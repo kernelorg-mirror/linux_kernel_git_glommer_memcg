@@ -87,8 +87,10 @@
  */
 
 #include	<linux/slab.h>
-#include	"slab.h"
+#include	<linux/memcontrol.h>
 #include	<linux/mm.h>
+#include	"slab.h"
+
 #include	<linux/poison.h>
 #include	<linux/swap.h>
 #include	<linux/cache.h>

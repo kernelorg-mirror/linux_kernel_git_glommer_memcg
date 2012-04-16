@@ -534,6 +534,10 @@ static inline void sock_release_memcg(struct sock *sk)
 {
 }
 
+static inline bool memcg_kmem_enabled(void)
+{
+	return false;
+}
 static inline bool
 memcg_kmem_newpage_charge(gfp_t gfp, struct mem_cgroup **memcg, int order)
 {

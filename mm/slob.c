@@ -59,9 +59,11 @@
 
 #include <linux/kernel.h>
 #include <linux/slab.h>
+
+#include <linux/memcontrol.h>
+#include <linux/mm.h>
 #include "slab.h"
 
-#include <linux/mm.h>
 #include <linux/swap.h> /* struct reclaim_state */
 #include <linux/cache.h>
 #include <linux/init.h>
