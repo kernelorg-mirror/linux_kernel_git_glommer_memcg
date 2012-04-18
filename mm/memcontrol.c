@@ -369,9 +369,15 @@ static bool memcg_kmem_is_active(struct mem_cgroup *memcg)
 	return test_bit(KMEM_ACCOUNTED_ACTIVE, &memcg->kmem_account_flags);
 }
 
-static void memcg_kmem_set_activated(struct mem_cgroup *memcg)
+static bool memcg_kmem_set_activated(struct mem_cgroup *memcg)
 {
-	set_bit(KMEM_ACCOUNTED_ACTIVATED, &memcg->kmem_account_flags);
+	return !test_and_set_bit(KMEM_ACCOUNTED_ACTIVATED,
+				 &memcg->kmem_account_flags);
+}
+
+static void memcg_kmem_clear_activated(struct mem_cgroup *memcg)
+{
+	clear_bit(KMEM_ACCOUNTED_ACTIVATED, &memcg->kmem_account_flags);
 }
 
 static void memcg_kmem_mark_dead(struct mem_cgroup *memcg)
@@ -545,6 +551,17 @@ static void disarm_sock_keys(struct mem_cgroup *memcg)
 #endif
 
 #ifdef CONFIG_MEMCG_KMEM
+static int memcg_limited_groups_array_size;
+#define MEMCG_CACHES_MIN_SIZE 64
+/*
+ * MAX_SIZE should be as large as the number of css_ids. Ideally, we could get
+ * this constant directly from cgroup, but it is understandable that this is
+ * better kept as an internal representation in cgroup.c
+ *
+ * As of right now, this should be enough.
+ */
+#define MEMCG_CACHES_MAX_SIZE 65535
+
 struct static_key memcg_kmem_enabled_key;
 
 static void disarm_kmem_keys(struct mem_cgroup *memcg)
@@ -2782,12 +2799,124 @@ int memcg_css_id(struct mem_cgroup *memcg)
 	return id;
 }
 
+/*
+ * This ends up being protected by the set_limit mutex, during normal
+ * operation, because that is its main call site.
+ *
+ * But when we create a new cache, we can call this as well if its parent
+ * is kmem-limited. That will have to hold set_limit_mutex as well.
+ */
+int memcg_update_cache_sizes(struct mem_cgroup *memcg)
+{
+	int num, ret;
+	/*
+	 * After this point, kmem_accounted (that we test atomically in
+	 * the beginning of this conditional), is no longer 0. This
+	 * guarantees only one process will set the following boolean
+	 * to true. We don't need test_and_set because we're protected
+	 * by the set_limit_mutex anyway.
+	 */
+	if (!memcg_kmem_set_activated(memcg))
+		return 0;
+
+	num = memcg_css_id(memcg);
+	ret = memcg_update_all_caches(num);
+	if (ret) {
+		memcg_kmem_clear_activated(memcg);
+		return ret;
+	}
+
+	INIT_LIST_HEAD(&memcg->memcg_slab_caches);
+	mutex_init(&memcg->slab_caches_mutex);
+	return 0;
+}
+
+static size_t memcg_caches_array_size(int num_groups)
+{
+	ssize_t size;
+	if (num_groups <= 0)
+		return 0;
+
+	size = 2 * num_groups;
+	if (size < MEMCG_CACHES_MIN_SIZE)
+		size = MEMCG_CACHES_MIN_SIZE;
+	else if (size > MEMCG_CACHES_MAX_SIZE)
+		size = MEMCG_CACHES_MAX_SIZE;
+
+	return size;
+}
+
+/*
+ * We should update the current array size iff all caches updates succeed. This
+ * can only be done from the slab side. The slab mutex needs to be held when
+ * calling this.
+ */
+void memcg_update_array_size(int num)
+{
+	if (num > memcg_limited_groups_array_size)
+		memcg_limited_groups_array_size = memcg_caches_array_size(num);
+}
+
+int memcg_update_cache_size(struct kmem_cache *s, int num_groups)
+{
+	struct memcg_cache_params *cur_params = s->memcg_params;
+
+	VM_BUG_ON(s->memcg_params && !s->memcg_params->is_root_cache);
+
+	if (num_groups > memcg_limited_groups_array_size) {
+		int i;
+		ssize_t size = memcg_caches_array_size(num_groups);
+
+		size *= sizeof(void *);
+		size += sizeof(struct memcg_cache_params);
+
+		s->memcg_params = kzalloc(size ,GFP_KERNEL);
+		if (!s->memcg_params) {
+			s->memcg_params = cur_params;
+			return -ENOMEM;
+		}
+
+		s->memcg_params->is_root_cache = true;
+
+		/*
+		 * There is the chance it will be bigger than
+		 * memcg_limited_groups_array_size, if we failed an allocation
+		 * in a cache, in which case all caches updated before it, will
+		 * have a bigger array.
+		 *
+		 * But if that is the case, the data after
+		 * memcg_limited_groups_array_size is certainly unused
+		 */
+		for (i = 0; memcg_limited_groups_array_size; i++) {
+			if (!cur_params->memcg_caches[i])
+				continue;
+			s->memcg_params->memcg_caches[i] =
+						cur_params->memcg_caches[i];
+		}
+
+		/*
+		 * Ideally, we would wait until all caches succeed, and only
+		 * then free the old one. But this is not worth the extra
+		 * pointer per-cache we'd have to have for this.
+		 *
+		 * It is not a big deal if some caches are left with a size
+		 * bigger than the others. And all updates will reset this
+		 * anyway.
+		 */
+		kfree(cur_params);
+	}
+	return 0;
+}
+
 int memcg_register_cache(struct mem_cgroup *memcg, struct kmem_cache *s)
 {
 	size_t size = sizeof(struct memcg_cache_params);
 
 	if (!memcg_kmem_enabled())
 		return 0;
+
+	if (!memcg)
+		size =+ memcg_limited_groups_array_size * sizeof(void *);
 
 	s->memcg_params = kzalloc(size, GFP_KERNEL);
 	if (!s->memcg_params)
@@ -4291,14 +4420,11 @@ static int memcg_update_kmem_limit(struct cgroup *cont, u64 val)
 		ret = res_counter_set_limit(&memcg->kmem, val);
 		VM_BUG_ON(ret);
 
-		/*
-		 * After this point, kmem_accounted (that we test atomically in
-		 * the beginning of this conditional), is no longer 0. This
-		 * guarantees only one process will set the following boolean
-		 * to true. We don't need test_and_set because we're protected
-		 * by the set_limit_mutex anyway.
-		 */
-		memcg_kmem_set_activated(memcg);
+		ret = memcg_update_cache_sizes(memcg);
+		if (ret) {
+			res_counter_set_limit(&memcg->kmem, RESOURCE_MAX);
+			goto out;
+		}
 		must_inc_static_branch = true;
 		/*
 		 * kmem charges can outlive the cgroup. In the case of slab
@@ -4337,9 +4463,10 @@ out:
 	return ret;
 }
 
-static void memcg_propagate_kmem(struct mem_cgroup *memcg,
-				 struct mem_cgroup *parent)
+static int memcg_propagate_kmem(struct mem_cgroup *memcg,
+				struct mem_cgroup *parent)
 {
+	int ret = 0;
 	memcg->kmem_account_flags = parent->kmem_account_flags;
 #ifdef CONFIG_MEMCG_KMEM
 	/*
@@ -4352,11 +4479,19 @@ static void memcg_propagate_kmem(struct mem_cgroup *memcg,
 	 * It is a lot simpler just to do static_key_slow_inc() on every child
 	 * that is accounted.
 	 */
-	if (memcg_kmem_is_active(memcg)) {
-		mem_cgroup_get(memcg);
-		static_key_slow_inc(&memcg_kmem_enabled_key);
-	}
+	if (!memcg_kmem_is_active(memcg))
+		return ret;
+
+	mutex_lock(&set_limit_mutex);
+	ret = memcg_update_cache_sizes(memcg);
+	mutex_unlock(&set_limit_mutex);
+	if (ret)
+		return ret;
+
+	mem_cgroup_get(memcg);
+	static_key_slow_inc(&memcg_kmem_enabled_key);
 #endif
+	return ret;
 }
 
 /*
@@ -5445,8 +5580,10 @@ mem_cgroup_create(struct cgroup *cont)
 		 * This refcnt will be decremented when freeing this
 		 * mem_cgroup(see mem_cgroup_put).
 		 */
+		error = memcg_propagate_kmem(memcg, parent);
+		if (error)
+			goto free_out;
 		mem_cgroup_get(parent);
-		memcg_propagate_kmem(memcg, parent);
 	} else {
 		res_counter_init(&memcg->res, NULL);
 		res_counter_init(&memcg->memsw, NULL);
