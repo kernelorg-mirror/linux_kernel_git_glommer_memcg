@@ -114,8 +114,10 @@ static int irqtime_account_si_update(void)
 static inline void task_group_account_field(struct task_struct *p, int index,
 					    u64 tmp)
 {
+#ifdef CONFIG_CGROUP_SCHED
+	struct task_group *tg;
+#endif
 #ifdef CONFIG_CGROUP_CPUACCT
-	struct kernel_cpustat *kcpustat;
 	struct cpuacct *ca;
 #endif
 	/*
@@ -125,7 +127,19 @@ static inline void task_group_account_field(struct task_struct *p, int index,
 	 *
 	 */
 	__get_cpu_var(kernel_cpustat).cpustat[index] += tmp;
+#ifdef CONFIG_CGROUP_SCHED
+	rcu_read_lock();
+	tg = container_of(task_subsys_state(p, cpu_cgroup_subsys_id),
+			  struct task_group, css);
 
+	while (tg && (tg != &root_task_group)) {
+		struct kernel_cpustat *kcpustat = this_cpu_ptr(tg->cpustat);
+
+		kcpustat->cpustat[index] += tmp;
+		tg = tg->parent;
+	}
+	rcu_read_unlock();
+#endif
 #ifdef CONFIG_CGROUP_CPUACCT
 	if (unlikely(!cpuacct_subsys.active))
 		return;
@@ -133,7 +147,8 @@ static inline void task_group_account_field(struct task_struct *p, int index,
 	rcu_read_lock();
 	ca = task_ca(p);
 	while (ca && (ca != &root_cpuacct)) {
-		kcpustat = this_cpu_ptr(ca->cpustat);
+		struct kernel_cpustat *kcpustat = this_cpu_ptr(ca->cpustat);
+
 		kcpustat->cpustat[index] += tmp;
 		ca = parent_ca(ca);
 	}
