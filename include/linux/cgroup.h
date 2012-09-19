@@ -397,6 +397,7 @@ struct cgroup_map_cb {
 #define CFTYPE_ONLY_ON_ROOT	(1U << 0)	/* only create on root cg */
 #define CFTYPE_NOT_ON_ROOT	(1U << 1)	/* don't create on root cg */
 #define CFTYPE_INSANE		(1U << 2)	/* don't create if sane_behavior */
+#define CFTYPE_NO_PREFIX	(1U << 3)	/* skip subsys prefix */
 
 #define MAX_CFTYPE_NAME		64
 
