@@ -112,6 +112,28 @@ static int irqtime_account_si_update(void)
 
 #endif /* !CONFIG_IRQ_TIME_ACCOUNTING */
 
+#ifdef CONFIG_CGROUP_SCHED
+void cpu_account_field(struct task_struct *p, int index, u64 val)
+{
+	struct task_group *tg;
+
+	rcu_read_lock();
+	tg = container_of(task_subsys_state(p, cpu_cgroup_subsys_id),
+			  struct task_group, css);
+
+	while (tg && (tg != &root_task_group)) {
+		struct kernel_cpustat *kcpustat = this_cpu_ptr(tg->cpustat);
+		kcpustat->cpustat[index] += val;
+		tg = tg->parent;
+	}
+	rcu_read_unlock();
+}
+#else
+static inline void cpu_account_field(struct task_struct *p, int index, u64 val)
+{
+
+}
+#endif
 static inline void task_group_account_field(struct task_struct *p, int index,
 					    u64 tmp)
 {
@@ -124,6 +146,7 @@ static inline void task_group_account_field(struct task_struct *p, int index,
 	__get_cpu_var(kernel_cpustat).cpustat[index] += tmp;
 
 	cpuacct_account_field(p, index, tmp);
+	cpu_account_field(p, index, tmp);
 }
 
 /*
