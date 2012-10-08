@@ -174,16 +174,15 @@ void kmem_cache_destroy(struct kmem_cache *s)
 	mutex_lock(&slab_mutex);
 	s->refcount--;
 	if (!s->refcount) {
-		list_del(&s->list);
-
 		if (!__kmem_cache_shutdown(s)) {
 			if (s->flags & SLAB_DESTROY_BY_RCU)
 				rcu_barrier();
 
+			list_del(&s->list);
+
 			kfree(s->name);
 			kmem_cache_free(kmem_cache, s);
 		} else {
-			list_add(&s->list, &slab_caches);
 			printk(KERN_ERR "kmem_cache_destroy %s: Slab cache still has objects\n",
 				s->name);
 			dump_stack();
