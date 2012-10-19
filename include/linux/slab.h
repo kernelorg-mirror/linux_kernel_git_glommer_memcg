@@ -143,6 +143,15 @@ unsigned int kmem_cache_size(struct kmem_cache *);
 		(__flags), NULL)
 
 /*
+ * Common kmalloc functions provided by all allocators
+ */
+void * __must_check __krealloc(const void *, size_t, gfp_t);
+void * __must_check krealloc(const void *, size_t, gfp_t);
+void kfree(const void *);
+void kzfree(const void *);
+size_t ksize(const void *);
+
+/*
  * The largest kmalloc size supported by the slab allocators is
  * 32 megabyte (2^25) or the maximum allocatable page order if that is
  * less than 32 MB.
@@ -176,15 +185,6 @@ unsigned int kmem_cache_size(struct kmem_cache *);
 #ifndef ARCH_SLAB_MINALIGN
 #define ARCH_SLAB_MINALIGN __alignof__(unsigned long long)
 #endif
-
-/*
- * Common kmalloc functions provided by all allocators
- */
-void * __must_check __krealloc(const void *, size_t, gfp_t);
-void * __must_check krealloc(const void *, size_t, gfp_t);
-void kfree(const void *);
-void kzfree(const void *);
-size_t ksize(const void *);
 
 /*
  * Allocator specific definitions. These are mainly used to establish optimized
