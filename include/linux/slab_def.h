@@ -91,7 +91,7 @@ struct kmem_cache {
 	 * is statically defined, so we reserve the max number of cpus.
 	 */
 	struct kmem_list3 **nodelists;
-	struct array_cache *array[NR_CPUS];
+	struct array_cache *array[NR_CPUS + MAX_NUMNODES];
 	/*
 	 * Do not add fields after array[]
 	 */
