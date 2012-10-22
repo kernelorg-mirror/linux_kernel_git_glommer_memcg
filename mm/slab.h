@@ -92,4 +92,30 @@ void get_slabinfo(struct kmem_cache *s, struct slabinfo *sinfo);
 void slabinfo_show_stats(struct seq_file *m, struct kmem_cache *s);
 ssize_t slabinfo_write(struct file *file, const char __user *buffer,
 		       size_t count, loff_t *ppos);
+
+/*
+ * What goes below for kmem_cache_free is not pretty. But because this
+ * is an extremely hot path, we would like to avoid function calls as
+ * much as we can.
+ *
+ * As ugly as it is, this is a way to guarantee that different allocators,
+ * with different layouts, and therefore, different free functions, can
+ * still live in different files and inline the whole of kmem_cache_free.
+ */
+/**
+ * kmem_cache_free - Deallocate an object
+ * @cachep: The cache the allocation was from.
+ * @objp: The previously allocated object.
+ *
+ * Free an object which was previously allocated from this
+ * cache.
+ *
+ */
+#define KMEM_CACHE_FREE(allocator_fn)			\
+void kmem_cache_free(struct kmem_cache *s, void *x)	\
+{							\
+	allocator_fn(s, x);				\
+	trace_kmem_cache_free(_RET_IP_, x);		\
+}							\
+EXPORT_SYMBOL(kmem_cache_free)
 #endif

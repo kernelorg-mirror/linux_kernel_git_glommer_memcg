@@ -2606,7 +2606,7 @@ redo:
 
 }
 
-void kmem_cache_free(struct kmem_cache *s, void *x)
+static __always_inline void __kmem_cache_free(struct kmem_cache *s, void *x)
 {
 	struct page *page;
 
@@ -2620,10 +2620,8 @@ void kmem_cache_free(struct kmem_cache *s, void *x)
 	}
 
 	slab_free(s, page, x, _RET_IP_);
-
-	trace_kmem_cache_free(_RET_IP_, x);
 }
-EXPORT_SYMBOL(kmem_cache_free);
+KMEM_CACHE_FREE(__kmem_cache_free);
 
 /*
  * Object placement in a slab is made very easy because we always start at

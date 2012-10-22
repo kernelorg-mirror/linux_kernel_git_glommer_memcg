@@ -571,7 +571,7 @@ static void kmem_rcu_free(struct rcu_head *head)
 	__kmem_cache_free(b, slob_rcu->size);
 }
 
-void kmem_cache_free(struct kmem_cache *c, void *b)
+static __always_inline void do_kmem_cache_free(struct kmem_cache *c, void *b)
 {
 	kmemleak_free_recursive(b, c->flags);
 	if (unlikely(c->flags & SLAB_DESTROY_BY_RCU)) {
@@ -582,10 +582,8 @@ void kmem_cache_free(struct kmem_cache *c, void *b)
 	} else {
 		__kmem_cache_free(b, c->size);
 	}
-
-	trace_kmem_cache_free(_RET_IP_, b);
 }
-EXPORT_SYMBOL(kmem_cache_free);
+KMEM_CACHE_FREE(do_kmem_cache_free);
 
 unsigned int kmem_cache_size(struct kmem_cache *c)
 {
