@@ -7675,6 +7675,7 @@ void sched_move_task(struct task_struct *tsk)
 	task_rq_unlock(rq, tsk, &flags);
 }
 
+#ifndef CONFIG_SCHEDSTATS
 void task_group_charge(struct task_struct *tsk, u64 cputime)
 {
 	struct task_group *tg;
@@ -7692,6 +7693,7 @@ void task_group_charge(struct task_struct *tsk, u64 cputime)
 
 	rcu_read_unlock();
 }
+#endif
 #endif /* CONFIG_CGROUP_SCHED */
 
 #if defined(CONFIG_RT_GROUP_SCHED) || defined(CONFIG_CFS_BANDWIDTH)
@@ -8048,21 +8050,91 @@ cpu_cgroup_exit(struct cgroup *cgrp, struct cgroup *old_cgrp,
 	sched_move_task(task);
 }
 
+/*
+ * Take rq->lock to make 64-bit write safe on 32-bit platforms.
+ */
+static inline void lock_rq_dword(int cpu)
+{
+#ifndef CONFIG_64BIT
+	raw_spin_lock_irq(&cpu_rq(cpu)->lock);
+#endif
+}
+
+static inline void unlock_rq_dword(int cpu)
+{
+#ifndef CONFIG_64BIT
+	raw_spin_unlock_irq(&cpu_rq(cpu)->lock);
+#endif
+}
+
+#ifdef CONFIG_SCHEDSTATS
+#ifdef CONFIG_FAIR_GROUP_SCHED
+static inline u64 cfs_exec_clock(struct task_group *tg, int cpu)
+{
+	return tg->cfs_rq[cpu]->exec_clock - tg->cfs_rq[cpu]->prev_exec_clock;
+}
+
+static inline void cfs_exec_clock_reset(struct task_group *tg, int cpu)
+{
+	tg->cfs_rq[cpu]->prev_exec_clock = tg->cfs_rq[cpu]->exec_clock;
+}
+#else
+static inline u64 cfs_exec_clock(struct task_group *tg, int cpu)
+{
+}
+
+static inline void cfs_exec_clock_reset(struct task_group *tg, int cpu)
+{
+}
+#endif
+#ifdef CONFIG_RT_GROUP_SCHED
+static inline u64 rt_exec_clock(struct task_group *tg, int cpu)
+{
+	return tg->rt_rq[cpu]->exec_clock - tg->rt_rq[cpu]->prev_exec_clock;
+}
+
+static inline void rt_exec_clock_reset(struct task_group *tg, int cpu)
+{
+	tg->rt_rq[cpu]->prev_exec_clock = tg->rt_rq[cpu]->exec_clock;
+}
+#else
+static inline u64 rt_exec_clock(struct task_group *tg, int cpu)
+{
+	return 0;
+}
+
+static inline void rt_exec_clock_reset(struct task_group *tg, int cpu)
+{
+}
+#endif
+
+static u64 task_group_cpuusage_read(struct task_group *tg, int cpu)
+{
+	u64 ret = 0;
+
+	lock_rq_dword(cpu);
+	ret = cfs_exec_clock(tg, cpu) + rt_exec_clock(tg, cpu);
+	unlock_rq_dword(cpu);
+
+	return ret;
+}
+
+static void task_group_cpuusage_write(struct task_group *tg, int cpu, u64 val)
+{
+	lock_rq_dword(cpu);
+	cfs_exec_clock_reset(tg, cpu);
+	rt_exec_clock_reset(tg, cpu);
+	unlock_rq_dword(cpu);
+}
+#else
 static u64 task_group_cpuusage_read(struct task_group *tg, int cpu)
 {
 	u64 *cpuusage = per_cpu_ptr(tg->cpuusage, cpu);
 	u64 data;
 
-#ifndef CONFIG_64BIT
-	/*
-	 * Take rq->lock to make 64-bit read safe on 32-bit platforms.
-	 */
-	raw_spin_lock_irq(&cpu_rq(cpu)->lock);
+	lock_rq_dword(cpu);
 	data = *cpuusage;
-	raw_spin_unlock_irq(&cpu_rq(cpu)->lock);
-#else
-	data = *cpuusage;
-#endif
+	unlock_rq_dword(cpu);
 
 	return data;
 }
@@ -8071,17 +8143,11 @@ static void task_group_cpuusage_write(struct task_group *tg, int cpu, u64 val)
 {
 	u64 *cpuusage = per_cpu_ptr(tg->cpuusage, cpu);
 
-#ifndef CONFIG_64BIT
-	/*
-	 * Take rq->lock to make 64-bit write safe on 32-bit platforms.
-	 */
-	raw_spin_lock_irq(&cpu_rq(cpu)->lock);
+	lock_rq_dword(cpu);
 	*cpuusage = val;
-	raw_spin_unlock_irq(&cpu_rq(cpu)->lock);
-#else
-	*cpuusage = val;
-#endif
+	unlock_rq_dword(cpu);
 }
+#endif
 
 /* return total cpu usage (in nanoseconds) of a group */
 static u64 cpucg_cpuusage_read(struct cgroup *cgrp, struct cftype *cft)
