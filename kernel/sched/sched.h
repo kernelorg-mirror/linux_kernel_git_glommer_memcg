@@ -597,8 +597,6 @@ static inline void set_task_rq(struct task_struct *p, unsigned int cpu)
 #endif
 }
 
-extern void task_group_charge(struct task_struct *tsk, u64 cputime);
-
 #else /* CONFIG_CGROUP_SCHED */
 
 static inline void set_task_rq(struct task_struct *p, unsigned int cpu) { }
@@ -606,9 +604,13 @@ static inline struct task_group *task_group(struct task_struct *p)
 {
 	return NULL;
 }
-static inline void task_group_charge(struct task_struct *tsk, u64 cputime) { }
-
 #endif /* CONFIG_CGROUP_SCHED */
+
+#if defined(CONFIG_CGROUP_SCHED) && !defined(CONFIG_SCHEDSTATS)
+extern void task_group_charge(struct task_struct *tsk, u64 cputime);
+#else
+static inline void task_group_charge(struct task_struct *tsk, u64 cputime) {}
+#endif
 
 static inline void __set_task_cpu(struct task_struct *p, unsigned int cpu)
 {
