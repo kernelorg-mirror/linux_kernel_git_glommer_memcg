@@ -311,14 +311,31 @@ struct mem_cgroup {
 	/* thresholds for mem+swap usage. RCU-protected */
 	struct mem_cgroup_thresholds memsw_thresholds;
 
-	/* For oom notifier event fd */
-	struct list_head oom_notify;
+	union {
+		/* For oom notifier event fd */
+		struct list_head oom_notify;
+		/*
+		 * we can only trigger an oom event if the memcg is alive.
+		 * so we will reuse this field to hook the memcg in the list
+		 * of dead memcgs.
+		 */
+		struct list_head dead;
+	};
 
-	/*
-	 * Should we move charges of a task when a task is moved into this
-	 * mem_cgroup ? And what type of charges should we move ?
-	 */
-	unsigned long 	move_charge_at_immigrate;
+	union {
+		/*
+		 * Should we move charges of a task when a task is moved into
+		 * this mem_cgroup ? And what type of charges should we move ?
+		 */
+		unsigned long 	move_charge_at_immigrate;
+
+		/*
+		 * We are no longer concerned about moving charges after memcg
+		 * is dead. So we will fill this up with its name, to aid
+		 * debugging.
+		 */
+		char *memcg_name;
+	};
 	/*
 	 * set > 0 if pages under this cgroup are moving to other cgroup.
 	 */
@@ -348,6 +365,33 @@ struct mem_cgroup {
 	int kmemcg_id;
 #endif
 };
+
+#if defined(CONFIG_MEMCG_KMEM) || defined(CONFIG_MEMCG_SWAP)
+static LIST_HEAD(dangling_memcgs);
+static DEFINE_MUTEX(dangling_memcgs_mutex);
+
+static inline void memcg_dangling_free(struct mem_cgroup *memcg)
+{
+	mutex_lock(&dangling_memcgs_mutex);
+	list_del(&memcg->dead);
+	mutex_unlock(&dangling_memcgs_mutex);
+	kfree(memcg->memcg_name);
+}
+
+static inline void memcg_dangling_add(struct mem_cgroup *memcg)
+{
+
+	memcg->memcg_name = kstrdup(cgroup_name(memcg->css.cgroup), GFP_KERNEL);
+
+	INIT_LIST_HEAD(&memcg->dead);
+	mutex_lock(&dangling_memcgs_mutex);
+	list_add(&memcg->dead, &dangling_memcgs);
+	mutex_unlock(&dangling_memcgs_mutex);
+}
+#else
+static inline void memcg_dangling_free(struct mem_cgroup *memcg) {}
+static inline void memcg_dangling_add(struct mem_cgroup *memcg) {}
+#endif
 
 /* internal only representation about the status of kmem accounting. */
 enum {
@@ -4868,6 +4912,92 @@ static ssize_t mem_cgroup_read(struct cgroup *cont, struct cftype *cft,
 	return simple_read_from_buffer(buf, nbytes, ppos, str, len);
 }
 
+#if defined(CONFIG_MEMCG_KMEM) || defined(CONFIG_MEMCG_SWAP)
+static void
+mem_cgroup_dangling_swap(struct mem_cgroup *memcg, struct seq_file *m)
+{
+#ifdef CONFIG_MEMCG_SWAP
+	u64 kmem;
+	u64 memsw;
+
+	/*
+	 * kmem will also propagate here, so we are only interested in the
+	 * difference.  See comment in mem_cgroup_reparent_charges for details.
+	 *
+	 * We could save this value for later consumption by kmem reports, but
+	 * there is not a lot of problem if the figures differ slightly.
+	 */
+	kmem = res_counter_read_u64(&memcg->kmem, RES_USAGE);
+	memsw = res_counter_read_u64(&memcg->memsw, RES_USAGE) - kmem;
+	seq_printf(m, "\t%llu swap bytes\n", memsw);
+#endif
+}
+
+static void
+mem_cgroup_dangling_kmem(struct mem_cgroup *memcg, struct seq_file *m)
+{
+#ifdef CONFIG_MEMCG_KMEM
+	u64 kmem;
+	struct memcg_cache_params *params;
+
+#ifdef CONFIG_INET
+	struct tcp_memcontrol *tcp = &memcg->tcp_mem;
+	s64 tcp_socks;
+	u64 tcp_bytes;
+
+	tcp_socks = percpu_counter_sum_positive(&tcp->tcp_sockets_allocated);
+	tcp_bytes = res_counter_read_u64(&tcp->tcp_memory_allocated, RES_USAGE);
+	seq_printf(m, "\t%llu tcp bytes, in %lld sockets\n",
+		   tcp_bytes, tcp_socks);
+
+#endif
+
+	kmem = res_counter_read_u64(&memcg->kmem, RES_USAGE);
+	seq_printf(m, "\t%llu kmem bytes", kmem);
+
+	/* list below may not be initialized, so not even try */
+	if (!kmem)
+		return;
+
+	seq_printf(m, " in caches");
+	mutex_lock(&memcg->slab_caches_mutex);
+	list_for_each_entry(params, &memcg->memcg_slab_caches, list) {
+			struct kmem_cache *s = memcg_params_to_cache(params);
+
+		seq_printf(m, " %s", s->name);
+	}
+	mutex_unlock(&memcg->slab_caches_mutex);
+	seq_printf(m, "\n");
+#endif
+}
+
+/*
+ * After a memcg is destroyed, it may still be kept around in memory.
+ * Currently, the two main reasons for it are swap entries, and kernel memory.
+ * Because they will be freed assynchronously, they will pin the memcg structure
+ * and its resources until the last reference goes away.
+ *
+ * This root-only file will show information about which users
+ */
+static int mem_cgroup_dangling_read(struct cgroup *cont, struct cftype *cft,
+					struct seq_file *m)
+{
+	struct mem_cgroup *memcg;
+
+	mutex_lock(&dangling_memcgs_mutex);
+
+	list_for_each_entry(memcg, &dangling_memcgs ,dead) {
+		seq_printf(m, "%s:\n", memcg->memcg_name);
+
+		mem_cgroup_dangling_swap(memcg, m);
+		mem_cgroup_dangling_kmem(memcg, m);
+	}
+
+	mutex_unlock(&dangling_memcgs_mutex);
+	return 0;
+}
+#endif
+
 static int memcg_update_kmem_limit(struct cgroup *cont, u64 val)
 {
 	int ret = -EINVAL;
@@ -5831,6 +5961,14 @@ static struct cftype mem_cgroup_files[] = {
 	},
 #endif
 #endif
+
+#if defined(CONFIG_MEMCG_KMEM) || defined(CONFIG_MEMCG_SWAP)
+	{
+		.name = "dangling_memcgs",
+		.read_seq_string = mem_cgroup_dangling_read,
+		.flags = CFTYPE_ONLY_ON_ROOT,
+	},
+#endif
 	{ },	/* terminate */
 };
 
@@ -5933,6 +6071,7 @@ static void __mem_cgroup_free(struct mem_cgroup *memcg)
 	 * the cgroup_lock.
 	 */
 	disarm_static_keys(memcg);
+
 	if (size < PAGE_SIZE)
 		kfree(memcg);
 	else
@@ -5950,6 +6089,8 @@ static void free_work(struct work_struct *work)
 	struct mem_cgroup *memcg;
 
 	memcg = container_of(work, struct mem_cgroup, work_freeing);
+
+	memcg_dangling_free(memcg);
 	__mem_cgroup_free(memcg);
 }
 
@@ -6139,6 +6280,7 @@ static void mem_cgroup_destroy(struct cgroup *cont)
 
 	kmem_cgroup_destroy(memcg);
 
+	memcg_dangling_add(memcg);
 	mem_cgroup_put(memcg);
 }
 
