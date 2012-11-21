@@ -401,6 +401,7 @@ int cgroup_rm_cftypes(struct cgroup_subsys *ss, const struct cftype *cfts);
 int cgroup_is_removed(const struct cgroup *cgrp);
 
 int cgroup_path(const struct cgroup *cgrp, char *buf, int buflen);
+extern const char *cgroup_name(const struct cgroup *cgrp);
 
 int cgroup_task_count(const struct cgroup *cgrp);
 

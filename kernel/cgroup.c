@@ -1757,6 +1757,15 @@ int cgroup_path(const struct cgroup *cgrp, char *buf, int buflen)
 }
 EXPORT_SYMBOL_GPL(cgroup_path);
 
+const char *cgroup_name(const struct cgroup *cgrp)
+{
+	struct dentry *dentry;
+	rcu_read_lock();
+	dentry = rcu_dereference_check(cgrp->dentry, cgroup_lock_is_held());
+	rcu_read_unlock();
+	return dentry->d_name.name;
+}
+
 /*
  * Control Group taskset
  */

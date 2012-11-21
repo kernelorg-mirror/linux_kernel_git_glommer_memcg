@@ -3141,16 +3141,13 @@ void mem_cgroup_destroy_cache(struct kmem_cache *cachep)
 static char *memcg_cache_name(struct mem_cgroup *memcg, struct kmem_cache *s)
 {
 	char *name;
-	struct dentry *dentry;
+	const char *cgname;
 
-	rcu_read_lock();
-	dentry = rcu_dereference(memcg->css.cgroup->dentry);
-	rcu_read_unlock();
-
-	BUG_ON(dentry == NULL);
+	cgname = cgroup_name(memcg->css.cgroup);
+	BUG_ON(cgname == NULL);
 
 	name = kasprintf(GFP_KERNEL, "%s(%d:%s)", s->name,
-			 memcg_cache_id(memcg), dentry->d_name.name);
+			 memcg_cache_id(memcg), cgname);
 
 	return name;
 }
