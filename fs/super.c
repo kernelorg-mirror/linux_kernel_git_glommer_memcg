@@ -104,7 +104,7 @@ static int prune_super(struct shrinker *shrink, struct shrink_control *sc)
 				sb->s_nr_inodes_unused + fs_objects;
 	}
 
-	total_objects = (total_objects / 100) * sysctl_vfs_cache_pressure;
+	total_objects = mult_frac(total_objects, sysctl_vfs_cache_pressure, 100);
 	drop_super(sb);
 	return total_objects;
 }
