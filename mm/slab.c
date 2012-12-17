@@ -3475,33 +3475,23 @@ done:
  * Fallback to other node is possible if __GFP_THISNODE is not set.
  */
 static __always_inline void *
-slab_alloc_node(struct kmem_cache *cachep, gfp_t flags, int nodeid,
-		   unsigned long caller)
+__do_slab_alloc_node(struct kmem_cache *cachep, gfp_t flags, int nodeid)
 {
-	unsigned long save_flags;
 	void *ptr;
 	int slab_node = numa_mem_id();
 
-	flags &= gfp_allowed_mask;
-
-	lockdep_trace_alloc(flags);
-
-	if (slab_should_failslab(cachep, flags))
-		return NULL;
-
-	cachep = memcg_kmem_get_cache(cachep, flags);
-
-	cache_alloc_debugcheck_before(cachep, flags);
-	local_irq_save(save_flags);
-
-	if (nodeid == NUMA_NO_NODE)
+	if (nodeid == NUMA_NO_NODE) {
+		if (unlikely(current->flags & (PF_SPREAD_SLAB | PF_MEMPOLICY))) {
+			ptr = alternate_node_alloc(cachep, flags);
+			if (ptr)
+				return ptr;
+		}
 		nodeid = slab_node;
-
-	if (unlikely(!cachep->nodelists[nodeid])) {
-		/* Node not bootstrapped yet */
-		ptr = fallback_alloc(cachep, flags);
-		goto out;
 	}
+
+	if (unlikely(!cachep->nodelists[nodeid]))
+		/* Node not bootstrapped yet */
+		return fallback_alloc(cachep, flags);
 
 	if (nodeid == slab_node) {
 		/*
@@ -3512,59 +3502,23 @@ slab_alloc_node(struct kmem_cache *cachep, gfp_t flags, int nodeid,
 		 */
 		ptr = ____cache_alloc(cachep, flags);
 		if (ptr)
-			goto out;
+			return ptr;
 	}
 	/* ___cache_alloc_node can fall back to other nodes */
-	ptr = ____cache_alloc_node(cachep, flags, nodeid);
-  out:
-	local_irq_restore(save_flags);
-	ptr = cache_alloc_debugcheck_after(cachep, flags, ptr, caller);
-	kmemleak_alloc_recursive(ptr, cachep->object_size, 1, cachep->flags,
-				 flags);
-
-	if (likely(ptr))
-		kmemcheck_slab_alloc(cachep, flags, ptr, cachep->object_size);
-
-	if (unlikely((flags & __GFP_ZERO) && ptr))
-		memset(ptr, 0, cachep->object_size);
-
-	return ptr;
-}
-
-static __always_inline void *
-__do_cache_alloc(struct kmem_cache *cache, gfp_t flags)
-{
-	void *objp;
-
-	if (unlikely(current->flags & (PF_SPREAD_SLAB | PF_MEMPOLICY))) {
-		objp = alternate_node_alloc(cache, flags);
-		if (objp)
-			goto out;
-	}
-	objp = ____cache_alloc(cache, flags);
-
-	/*
-	 * We may just have run out of memory on the local node.
-	 * ____cache_alloc_node() knows how to locate memory on other nodes
-	 */
-	if (!objp)
-		objp = ____cache_alloc_node(cache, flags, numa_mem_id());
-
-  out:
-	return objp;
+	return ____cache_alloc_node(cachep, flags, nodeid);
 }
 #else
-
 static __always_inline void *
-__do_cache_alloc(struct kmem_cache *cachep, gfp_t flags)
+__do_slab_alloc_node(struct kmem_cache *cachep, gfp_t flags, int nodeid)
 {
+
 	return ____cache_alloc(cachep, flags);
 }
-
 #endif /* CONFIG_NUMA */
 
 static __always_inline void *
-slab_alloc(struct kmem_cache *cachep, gfp_t flags, unsigned long caller)
+slab_alloc_node(struct kmem_cache *cachep, gfp_t flags, int nodeid,
+		unsigned long caller)
 {
 	unsigned long save_flags;
 	void *objp;
@@ -3580,11 +3534,11 @@ slab_alloc(struct kmem_cache *cachep, gfp_t flags, unsigned long caller)
 
 	cache_alloc_debugcheck_before(cachep, flags);
 	local_irq_save(save_flags);
-	objp = __do_cache_alloc(cachep, flags);
+	objp = __do_slab_alloc_node(cachep, flags, nodeid);
 	local_irq_restore(save_flags);
 	objp = cache_alloc_debugcheck_after(cachep, flags, objp, caller);
 	kmemleak_alloc_recursive(objp, cachep->object_size, 1, cachep->flags,
-				 flags);
+				flags);
 	prefetchw(objp);
 
 	if (likely(objp))
@@ -3742,7 +3696,7 @@ static inline void __cache_free(struct kmem_cache *cachep, void *objp,
  */
 void *kmem_cache_alloc(struct kmem_cache *cachep, gfp_t flags)
 {
-	void *ret = slab_alloc(cachep, flags, _RET_IP_);
+	void *ret = slab_alloc_node(cachep, flags, NUMA_NO_NODE, _RET_IP_);
 
 	trace_kmem_cache_alloc(_RET_IP_, ret,
 			       cachep->object_size, cachep->size, flags);
@@ -3757,7 +3711,7 @@ kmem_cache_alloc_trace(struct kmem_cache *cachep, gfp_t flags, size_t size)
 {
 	void *ret;
 
-	ret = slab_alloc(cachep, flags, _RET_IP_);
+	ret = slab_alloc_node(cachep, flags, NUMA_NO_NODE, _RET_IP_);
 
 	trace_kmalloc(_RET_IP_, ret,
 		      size, cachep->size, flags);
@@ -3850,7 +3804,7 @@ static __always_inline void *__do_kmalloc(size_t size, gfp_t flags,
 	cachep = __find_general_cachep(size, flags);
 	if (unlikely(ZERO_OR_NULL_PTR(cachep)))
 		return cachep;
-	ret = slab_alloc(cachep, flags, caller);
+	ret = slab_alloc_node(cachep, flags, NUMA_NO_NODE, caller);
 
 	trace_kmalloc(caller, ret,
 		      size, cachep->size, flags);
