@@ -2318,18 +2318,15 @@ new_slab:
  *
  * Otherwise we can simply pick the next object from the lockless free list.
  */
-static __always_inline void *slab_alloc_node(struct kmem_cache *s,
-		gfp_t gfpflags, int node, unsigned long addr)
+static __always_inline void *
+do_slab_alloc_node(struct kmem_cache *s, gfp_t gfpflags, int node,
+		   unsigned long addr)
 {
 	void **object;
 	struct kmem_cache_cpu *c;
 	struct page *page;
 	unsigned long tid;
 
-	if (slab_pre_alloc_hook(s, gfpflags))
-		return NULL;
-
-	s = memcg_kmem_get_cache(s, gfpflags);
 redo:
 
 	/*
@@ -2387,6 +2384,23 @@ redo:
 	slab_post_alloc_hook(s, gfpflags, object);
 
 	return object;
+}
+
+static __always_inline void *
+slab_alloc_node(struct kmem_cache *s, gfp_t gfpflags,
+		int node, unsigned long addr)
+{
+	void *obj;
+
+	if (slab_pre_alloc_hook(s, gfpflags))
+		return NULL;
+
+	s = memcg_kmem_get_cache(s, gfpflags);
+
+	obj = do_slab_alloc_node(s, gfpflags, node, addr);
+	if (slab_should_retry(obj, gfpflags))
+		obj = do_slab_alloc_node(s, gfpflags, node, addr);
+	return obj;
 }
 
 void *kmem_cache_alloc(struct kmem_cache *s, gfp_t gfpflags)
