@@ -424,7 +424,7 @@ out:
  */
 
 static __always_inline void *
-__do_kmalloc_node(size_t size, gfp_t gfp, int node, unsigned long caller)
+___do_kmalloc_node(size_t size, gfp_t gfp, int node, unsigned long caller)
 {
 	unsigned int *m;
 	int align = max_t(size_t, ARCH_KMALLOC_MINALIGN, ARCH_SLAB_MINALIGN);
@@ -460,6 +460,16 @@ __do_kmalloc_node(size_t size, gfp_t gfp, int node, unsigned long caller)
 
 	kmemleak_alloc(ret, size, 1, gfp);
 	return ret;
+}
+
+
+static __always_inline void *
+__do_kmalloc_node(size_t size, gfp_t gfp, int node, unsigned long caller)
+{
+	void *obj = ___do_kmalloc_node(size, gfp, node, caller);
+        if (slab_should_retry(obj, gfp))
+		obj = ___do_kmalloc_node(size, gfp, node, caller);
+	return obj;
 }
 
 void *__kmalloc_node(size_t size, gfp_t gfp, int node)
@@ -534,7 +544,9 @@ int __kmem_cache_create(struct kmem_cache *c, unsigned long flags)
 	return 0;
 }
 
-void *kmem_cache_alloc_node(struct kmem_cache *c, gfp_t flags, int node)
+static __always_inline void *
+slab_alloc_node(struct kmem_cache *c, gfp_t flags, int node,
+		unsigned long caller)
 {
 	void *b;
 
@@ -544,12 +556,12 @@ void *kmem_cache_alloc_node(struct kmem_cache *c, gfp_t flags, int node)
 
 	if (c->size < PAGE_SIZE) {
 		b = slob_alloc(c->size, flags, c->align, node);
-		trace_kmem_cache_alloc_node(_RET_IP_, b, c->object_size,
+		trace_kmem_cache_alloc_node(caller, b, c->object_size,
 					    SLOB_UNITS(c->size) * SLOB_UNIT,
 					    flags, node);
 	} else {
 		b = slob_new_pages(flags, get_order(c->size), node);
-		trace_kmem_cache_alloc_node(_RET_IP_, b, c->object_size,
+		trace_kmem_cache_alloc_node(caller, b, c->object_size,
 					    PAGE_SIZE << get_order(c->size),
 					    flags, node);
 	}
@@ -562,6 +574,13 @@ void *kmem_cache_alloc_node(struct kmem_cache *c, gfp_t flags, int node)
 }
 EXPORT_SYMBOL(kmem_cache_alloc_node);
 
+void *kmem_cache_alloc_node(struct kmem_cache *c, gfp_t flags, int node)
+{
+	void *obj = slab_alloc_node(c, flags, node, _RET_IP_);
+        if (slab_should_retry(obj, flags))
+		obj = slab_alloc_node(c, flags, node, _RET_IP_);
+	return obj;
+}
 static void __kmem_cache_free(void *b, int size)
 {
 	if (size < PAGE_SIZE)

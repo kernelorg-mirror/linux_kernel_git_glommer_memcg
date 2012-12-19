@@ -104,6 +104,48 @@ void slabinfo_show_stats(struct seq_file *m, struct kmem_cache *s);
 ssize_t slabinfo_write(struct file *file, const char __user *buffer,
 		       size_t count, loff_t *ppos);
 
+/*
+ * When we are out of space in the caches, we will try to allocate a new page.
+ * If we still fail, the page allocator will try to free pages through direct
+ * reclaim. Which means that if an object allocation failed we can be sure that
+ * no new pages could be given to us.
+ *
+ * However, direct reclaim will also try to shrink objects from registered
+ * shrinkers. They won't necessarily free a full page, but if our cache happens
+ * to be one with a shrinker, this may very well open up the space we need. So
+ * we retry the allocation in this case.
+ *
+ * We can't know for sure if this is the case. So the best we can do is try
+ * to derive from our allocation flags how likely it is for direct reclaim to
+ * have been called.
+ *
+ * Most of the time the allocation will succeed, and this will be just a branch
+ * with a very high hit ratio.
+ */
+static inline bool slab_should_retry(void *obj, gfp_t flags)
+{
+	if (likely(obj))
+		return false;
+
+	/*
+	 * those are obvious. We can't retry if the flags either explicitly
+	 * prohibit, or disallow waiting.
+	 */
+	if ((flags & __GFP_NORETRY) && !(flags & __GFP_WAIT))
+		return false;
+
+	/*
+	 * If this is not a __GFP_FS allocation, we are unlikely to have
+	 * reclaimed many objects - if at all. We may have succeeded in
+	 * allocating a new page, in which case the object allocation would
+	 * have succeeded, but most of the shrinkable objects would still be
+	 * in their caches. So retrying is likely futile.
+	 */
+	if (!(flags & __GFP_FS))
+		return false;
+	return true;
+}
+
 #ifdef CONFIG_MEMCG_KMEM
 static inline bool is_root_cache(struct kmem_cache *s)
 {
