@@ -68,6 +68,24 @@ The CPU controller exposes the following files to the user:
    can ever be run in this cgroup. For more information about rt tasks runtime
    assignments, see scheduler/sched-rt-group.txt
 
+ - cpu.stat_percpu: Various scheduler statistics for the current group. The
+   information provided in this file is akin to the one displayed in /proc/stat,
+   except for the fact that it is cgroup-aware. The file format consists of a
+   one-line header that describes the fields being listed.  No guarantee is
+   given that the fields will be kept the same between kernel releases, and
+   readers should always check the header in order to introspect it.
+
+   Each of the following lines will show the respective field value for
+   each of the possible cpus in the system. All values are show in
+   nanoseconds. One example output for this file is:
+
+   cpu user nice system irq softirq guest guest_nice wait nr_switches nr_running
+   cpu0 471000000 0 15000000 0 0 0 0 1996534 7205 1
+   cpu1 588000000 0 17000000 0 0 0 0 2848680 6510 1
+   cpu2 505000000 0 14000000 0 0 0 0 2350771 6183 1
+   cpu3 472000000 0 16000000 0 0 0 0 19766345 6277 2
+
+
  - cpuacct.usage: The aggregate CPU time, in nanoseconds, consumed by all tasks
    in this group.
 

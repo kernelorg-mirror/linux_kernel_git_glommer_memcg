@@ -242,8 +242,16 @@ extern void sched_move_task(struct task_struct *tsk);
 extern int sched_group_set_shares(struct task_group *tg, unsigned long shares);
 #endif
 
-#else /* CONFIG_CGROUP_SCHED */
 
+#ifdef CONFIG_FAIR_GROUP_SCHED
+extern u64 cfs_read_wait(struct task_group *tg, int cpu);
+#else
+static inline u64 cfs_read_wait(struct task_group *tg, int cpu)
+{
+	return 0;
+}
+#endif
+#else /* CONFIG_CGROUP_SCHED */
 struct cfs_bandwidth { };
 
 #endif	/* CONFIG_CGROUP_SCHED */
