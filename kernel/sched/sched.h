@@ -273,6 +273,7 @@ struct cfs_rq {
 	unsigned int nr_spread_over;
 #endif
 
+	u64 nr_switches;
 #ifdef CONFIG_SMP
 /*
  * Load-tracking only depends on SMP, FAIR_GROUP_SCHED dependency below may be
@@ -342,6 +343,8 @@ static inline int rt_bandwidth_enabled(void)
 struct rt_rq {
 	struct rt_prio_array active;
 	unsigned int rt_nr_running;
+	u64 rt_nr_switches;
+
 #if defined CONFIG_SMP || defined CONFIG_RT_GROUP_SCHED
 	struct {
 		int curr; /* highest queued rt task prio */

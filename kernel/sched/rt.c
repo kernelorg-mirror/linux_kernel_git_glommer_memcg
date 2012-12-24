@@ -1366,13 +1366,16 @@ static struct sched_rt_entity *pick_next_rt_entity(struct rq *rq,
 	return next;
 }
 
-static struct task_struct *_pick_next_task_rt(struct rq *rq)
+static struct task_struct *
+_pick_next_task_rt(struct rq *rq, struct task_struct *prev)
 {
 	struct sched_rt_entity *rt_se;
 	struct task_struct *p;
 	struct rt_rq *rt_rq  = &rq->rt;
 
 	do {
+		if (likely(prev))
+			rt_rq->rt_nr_switches++;
 		rt_se = pick_next_rt_entity(rq, rt_rq);
 		BUG_ON(!rt_se);
 		rt_rq = group_rt_rq(rt_se);
@@ -1380,6 +1383,14 @@ static struct task_struct *_pick_next_task_rt(struct rq *rq)
 
 	p = rt_task_of(rt_se);
 	p->se.exec_start = rq->clock_task;
+
+	/* See fair.c for an explanation on this */
+	if (unlikely(p == prev)) {
+		for_each_sched_rt_entity(rt_se) {
+			rt_rq = rt_rq_of_se(rt_se);
+			rt_rq->rt_nr_switches--;
+		}
+	}
 
 	return p;
 }
@@ -1399,7 +1410,7 @@ pick_next_task_rt(struct rq *rq, struct task_struct *prev)
 	if (prev)
 		prev->sched_class->put_prev_task(rq, prev);
 
-	p = _pick_next_task_rt(rq);
+	p = _pick_next_task_rt(rq, prev);
 
 	/* The running task is never eligible for pushing */
 	if (p)
