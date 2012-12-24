@@ -198,8 +198,16 @@ extern void init_tg_rt_entry(struct task_group *tg, struct rt_rq *rt_rq,
 		struct sched_rt_entity *rt_se, int cpu,
 		struct sched_rt_entity *parent);
 
-#else /* CONFIG_CGROUP_SCHED */
 
+#ifdef CONFIG_FAIR_GROUP_SCHED
+extern u64 cfs_read_wait(struct task_group *tg, int cpu);
+#else
+static inline u64 cfs_read_wait(struct task_group *tg, int cpu)
+{
+	return 0;
+}
+#endif
+#else /* CONFIG_CGROUP_SCHED */
 struct cfs_bandwidth { };
 
 #endif	/* CONFIG_CGROUP_SCHED */
@@ -1195,7 +1203,6 @@ extern void init_cfs_rq(struct cfs_rq *cfs_rq);
 extern void init_rt_rq(struct rt_rq *rt_rq, struct rq *rq);
 
 extern void account_cfs_bandwidth_used(int enabled, int was_enabled);
-
 #ifdef CONFIG_NO_HZ
 enum rq_nohz_flag_bits {
 	NOHZ_TICK_STOPPED,

@@ -1104,6 +1104,20 @@ static void update_cfs_shares(struct cfs_rq *cfs_rq)
 
 	reweight_entity(cfs_rq_of(se), se, shares);
 }
+
+#ifdef CONFIG_SCHEDSTATS
+u64 cfs_read_wait(struct task_group *tg, int cpu)
+{
+	struct sched_entity *se = tg->se[cpu];
+	struct cfs_rq *cfs_rq = cfs_rq_of(se);
+	u64 value = se->statistics.wait_sum;
+
+	if (!se->statistics.wait_start)
+		return value;
+
+	return value + rq_of(cfs_rq)->clock - se->statistics.wait_start;
+}
+#endif
 #else /* CONFIG_FAIR_GROUP_SCHED */
 static inline void update_cfs_shares(struct cfs_rq *cfs_rq)
 {

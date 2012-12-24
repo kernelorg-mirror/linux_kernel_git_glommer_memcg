@@ -7680,6 +7680,7 @@ static inline void cfs_exec_clock_reset(struct task_group *tg, int cpu)
 #else
 static inline u64 cfs_exec_clock(struct task_group *tg, int cpu)
 {
+	return 0;
 }
 
 static inline void cfs_exec_clock_reset(struct task_group *tg, int cpu)
@@ -8111,6 +8112,108 @@ static u64 cpu_rt_period_read_uint(struct cgroup *cgrp, struct cftype *cft)
 }
 #endif /* CONFIG_RT_GROUP_SCHED */
 
+#ifdef CONFIG_SCHEDSTATS
+
+#ifdef CONFIG_FAIR_GROUP_SCHED
+#define fair_rq(field, tg, i)  (tg)->cfs_rq[i]->field
+#else
+#define fair_rq(field, tg, i)  0
+#endif
+
+#ifdef CONFIG_RT_GROUP_SCHED
+#define rt_rq(field, tg, i)  (tg)->rt_rq[i]->field
+#else
+#define rt_rq(field, tg, i)  0
+#endif
+
+static u64 tg_nr_switches(struct task_group *tg, int cpu)
+{
+	/* nr_switches, which counts idle and stop task, is added to all tgs */
+	return cpu_rq(cpu)->nr_switches +
+		cfs_nr_switches(tg, cpu) + rt_nr_switches(tg, cpu);
+}
+
+static u64 tg_nr_running(struct task_group *tg, int cpu)
+{
+	/*
+	 * because of autogrouped groups in root_task_group, the
+	 * following does not hold.
+	 */
+	if (tg != &root_task_group)
+		return rt_rq(rt_nr_running, tg, cpu) + fair_rq(nr_running, tg, cpu);
+
+	return cpu_rq(cpu)->nr_running;
+}
+
+static u64 tg_wait(struct task_group *tg, int cpu)
+{
+	u64 val;
+
+	if (tg != &root_task_group)
+		val = cfs_read_wait(tg, cpu);
+	else
+		/*
+		 * There are many errors here that we are accumulating.
+		 * However, we only provide this in the interest of having
+		 * a consistent interface for all cgroups. Everybody
+		 * probing the root cgroup should be getting its figures
+		 * from system-wide files as /proc/stat. That would be faster
+		 * to begin with...
+		 */
+		val = kcpustat_cpu(cpu).cpustat[CPUTIME_STEAL] * TICK_NSEC;
+
+	return val;
+}
+
+static inline void do_fill_seq(struct seq_file *m, struct task_group *tg,
+			       int cpu, int index)
+{
+	u64 val = 0;
+	struct kernel_cpustat *kcpustat;
+	kcpustat = per_cpu_ptr(tg->cpustat, cpu);
+	val = cputime64_to_clock_t(kcpustat->cpustat[index]) * TICK_NSEC;
+	seq_put_decimal_ull(m, ' ', val);
+}
+
+/*
+ * This will dislay per-cpu statistics about the running cgroup. The file
+ * format consists of a one-line header that describes the fields being listed.
+ * No guarantee is given that the fields will be kept the same between kernel
+ * releases, and readers should always check the header in order to introspect
+ * it. The first column, however, will always be in the form cpux, where
+ * x is the logical number of the cpu.
+ *
+ * Each of the following lines will show the respective field value for each of
+ * the possible cpus in the system. All values are show in nanoseconds.
+ */
+static int cpu_stats_percpu_show(struct cgroup *cgrp, struct cftype *cft,
+				 struct seq_file *m)
+{
+	struct task_group *tg = cgroup_tg(cgrp);
+	int cpu;
+
+	seq_printf(m, "cpu user nice system irq softirq guest guest_nice ");
+	seq_printf(m, "wait nr_switches nr_running\n");
+
+	for_each_possible_cpu(cpu) {
+		seq_printf(m, "cpu%d", cpu);
+		do_fill_seq(m, tg, cpu, CPUTIME_USER);
+		do_fill_seq(m, tg, cpu, CPUTIME_NICE);
+		do_fill_seq(m, tg, cpu, CPUTIME_SYSTEM);
+		do_fill_seq(m, tg, cpu, CPUTIME_IRQ);
+		do_fill_seq(m, tg, cpu, CPUTIME_SOFTIRQ);
+		do_fill_seq(m, tg, cpu, CPUTIME_GUEST);
+		do_fill_seq(m, tg, cpu, CPUTIME_GUEST_NICE);
+		seq_put_decimal_ull(m, ' ', tg_wait(tg, cpu));
+		seq_put_decimal_ull(m, ' ', tg_nr_switches(tg, cpu));
+		seq_put_decimal_ull(m, ' ', tg_nr_running(tg, cpu));
+		seq_putc(m, '\n');
+	}
+
+	return 0;
+}
+#endif
+
 static struct cftype cpu_files[] = {
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	{
@@ -8164,6 +8267,12 @@ static struct cftype cpu_files[] = {
 		.flags = CFTYPE_NO_PREFIX,
 		.read_map = cpucg_stats_show,
 	},
+#ifdef CONFIG_SCHEDSTATS
+	{
+		.name = "stat_percpu",
+		.read_seq_string = cpu_stats_percpu_show,
+	},
+#endif
 	{ }	/* terminate */
 };
 
