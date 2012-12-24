@@ -3609,6 +3609,8 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev)
 		prev->sched_class->put_prev_task(rq, prev);
 
 	do {
+		if (likely(prev))
+			cfs_rq->nr_switches++;
 		se = pick_next_entity(cfs_rq);
 		set_next_entity(cfs_rq, se);
 		cfs_rq = group_cfs_rq(se);
@@ -3617,6 +3619,22 @@ pick_next_task_fair(struct rq *rq, struct task_struct *prev)
 	p = task_of(se);
 	if (hrtick_enabled(rq))
 		hrtick_start_fair(rq, p);
+
+	/*
+	 * This condition is extremely unlikely, and most of the time will just
+	 * consist of this unlikely branch, which is extremely cheap. But we
+	 * still need to have it, because when we first loop through cfs_rq's,
+	 * we can't possibly know which task we will pick. The call to
+	 * set_next_entity above is not meant to mess up the tree in this case,
+	 * so this should give us the same chain, in the same order.
+	 */
+	if (unlikely(p == prev)) {
+		se = &p->se;
+		for_each_sched_entity(se) {
+			cfs_rq = cfs_rq_of(se);
+			cfs_rq->nr_switches--;
+		}
+	}
 
 	return p;
 }
