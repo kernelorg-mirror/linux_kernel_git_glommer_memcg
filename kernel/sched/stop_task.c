@@ -32,6 +32,8 @@ pick_next_task_stop(struct rq *rq, struct task_struct *prev)
 		stop->se.exec_start = rq->clock_task;
 		if (prev)
 			prev->sched_class->put_prev_task(rq, prev);
+		if (prev != rq->stop)
+			rq->nr_switches++;
 		return stop;
 	}
 

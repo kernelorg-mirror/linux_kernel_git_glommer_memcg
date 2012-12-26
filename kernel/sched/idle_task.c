@@ -39,6 +39,9 @@ pick_next_task_idle(struct rq *rq, struct task_struct *prev)
 	if (prev)
 		prev->sched_class->put_prev_task(rq, prev);
 
+	if (prev != rq->idle)
+		rq->nr_switches++;
+
 	schedstat_inc(rq, sched_goidle);
 #ifdef CONFIG_SMP
 	/* Trigger the post schedule to do an idle_enter for CFS */
