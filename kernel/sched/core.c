@@ -2001,13 +2001,27 @@ unsigned long nr_uninterruptible(void)
 	return sum;
 }
 
+#ifdef CONFIG_FAIR_GROUP_SCHED
+#define cfs_nr_switches(tg, cpu) (tg)->cfs_rq[cpu]->nr_switches
+#else
+#define cfs_nr_switches(tg, cpu) cpu_rq(cpu)->cfs.nr_switches
+#endif
+#ifdef CONFIG_RT_GROUP_SCHED
+#define rt_nr_switches(tg, cpu) (tg)->rt_rq[cpu]->rt_nr_switches
+#else
+#define rt_nr_switches(tg, cpu) cpu_rq(cpu)->rt.rt_nr_switches
+#endif
+
 unsigned long long nr_context_switches(void)
 {
 	int i;
 	unsigned long long sum = 0;
 
-	for_each_possible_cpu(i)
+	for_each_possible_cpu(i) {
+		sum += cfs_nr_switches(&root_task_group, i);
+		sum += rt_nr_switches(&root_task_group, i);
 		sum += cpu_rq(i)->nr_switches;
+	}
 
 	return sum;
 }
@@ -2929,7 +2943,6 @@ need_resched:
 	rq->skip_clock_update = 0;
 
 	if (likely(prev != next)) {
-		rq->nr_switches++;
 		rq->curr = next;
 		++*switch_count;
 
