@@ -4716,6 +4716,31 @@ static void mem_cgroup_reparent_charges(struct mem_cgroup *memcg)
 }
 
 /*
+ * must be called with cgroup_lock held, unless the cgroup is guaranteed to be
+ * already dead (like in mem_cgroup_force_empty, for instance).  This is
+ * different than mem_cgroup_count_children, in the sense that we don't really
+ * care how many children we have, we only need to know if we have any. It is
+ * also count any memcg without hierarchy as infertile for that matter.
+ */
+static inline bool memcg_has_children(struct mem_cgroup *memcg)
+{
+	struct mem_cgroup *iter;
+
+	if (!memcg->use_hierarchy)
+		return false;
+
+	/* bounce at first found */
+	for_each_mem_cgroup_tree(iter, memcg) {
+		if ((iter == memcg))
+			continue;
+		mem_cgroup_iter_break(memcg, iter);
+		return true;
+	}
+
+	return false;
+}
+
+/*
  * Reclaims as many pages from the given memcg as possible and moves
  * the rest to the parent.
  *
@@ -4800,7 +4825,7 @@ static int mem_cgroup_hierarchy_write(struct cgroup *cont, struct cftype *cft,
 	 */
 	if ((!parent_memcg || !parent_memcg->use_hierarchy) &&
 				(val == 1 || val == 0)) {
-		if (list_empty(&cont->children))
+		if (!memcg_has_children(memcg))
 			memcg->use_hierarchy = val;
 		else
 			retval = -EBUSY;
@@ -4917,8 +4942,7 @@ static int memcg_update_kmem_limit(struct cgroup *cont, u64 val)
 	cgroup_lock();
 	mutex_lock(&set_limit_mutex);
 	if (!memcg->kmem_account_flags && val != RESOURCE_MAX) {
-		if (cgroup_task_count(cont) || (memcg->use_hierarchy &&
-						!list_empty(&cont->children))) {
+		if (cgroup_task_count(cont) || memcg_has_children(memcg)) {
 			ret = -EBUSY;
 			goto out;
 		}
@@ -5334,8 +5358,7 @@ static int mem_cgroup_swappiness_write(struct cgroup *cgrp, struct cftype *cft,
 	cgroup_lock();
 
 	/* If under hierarchy, only empty-root can set this value */
-	if ((parent->use_hierarchy) ||
-	    (memcg->use_hierarchy && !list_empty(&cgrp->children))) {
+	if ((parent->use_hierarchy) || memcg_has_children(memcg)) {
 		cgroup_unlock();
 		return -EINVAL;
 	}
