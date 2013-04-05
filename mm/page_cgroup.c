@@ -61,27 +61,20 @@ static int __init alloc_node_page_cgroup(int nid)
 	return 0;
 }
 
-void __init page_cgroup_init(void)
+bool page_cgroup_init(void)
 {
 
 	int nid, fail;
 
 	if (mem_cgroup_disabled())
-		return;
+		return 0;
 
 	for_each_online_node(nid)  {
 		fail = alloc_node_page_cgroup(nid);
 		if (fail)
-			goto fail;
+			return 1;
 	}
-	printk(KERN_INFO "allocated %ld bytes of page_cgroup\n", total_usage);
-	printk(KERN_INFO "please try 'cgroup_disable=memory' option if you"
-	" don't want memory cgroups\n");
-	return;
-fail:
-	printk(KERN_CRIT "allocation of page_cgroup failed.\n");
-	printk(KERN_CRIT "please try 'cgroup_disable=memory' boot option\n");
-	panic("Out of memory");
+	return 0;
 }
 
 #else /* CONFIG_FLAT_NODE_MEM_MAP */
@@ -262,13 +255,13 @@ static int __meminit page_cgroup_callback(struct notifier_block *self,
 
 #endif
 
-void __init page_cgroup_init(void)
+bool page_cgroup_init(void)
 {
 	unsigned long pfn;
 	int nid;
 
 	if (mem_cgroup_disabled())
-		return;
+		return 0;
 
 	for_each_node_state(nid, N_MEMORY) {
 		unsigned long start_pfn, end_pfn;
@@ -295,17 +288,11 @@ void __init page_cgroup_init(void)
 			if (pfn_to_nid(pfn) != nid)
 				continue;
 			if (init_section_page_cgroup(pfn, nid))
-				goto oom;
+				return 1;
 		}
 	}
 	hotplug_memory_notifier(page_cgroup_callback, 0);
-	printk(KERN_INFO "allocated %ld bytes of page_cgroup\n", total_usage);
-	printk(KERN_INFO "please try 'cgroup_disable=memory' option if you "
-			 "don't want memory cgroups\n");
-	return;
-oom:
-	printk(KERN_CRIT "try 'cgroup_disable=memory' boot option\n");
-	panic("Out of memory");
+	return 0;
 }
 
 void __meminit pgdat_page_cgroup_init(struct pglist_data *pgdat)

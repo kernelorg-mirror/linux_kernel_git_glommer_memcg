@@ -29,7 +29,7 @@ struct page_cgroup {
 
 void __meminit pgdat_page_cgroup_init(struct pglist_data *pgdat);
 
-extern void __init page_cgroup_init(void);
+extern bool page_cgroup_init(void);
 
 struct page_cgroup *lookup_page_cgroup(struct page *page);
 struct page *lookup_cgroup_page(struct page_cgroup *pc);
@@ -82,10 +82,6 @@ static inline void __meminit pgdat_page_cgroup_init(struct pglist_data *pgdat)
 static inline struct page_cgroup *lookup_page_cgroup(struct page *page)
 {
 	return NULL;
-}
-
-static inline void page_cgroup_init(void)
-{
 }
 #endif /* CONFIG_MEMCG */
 

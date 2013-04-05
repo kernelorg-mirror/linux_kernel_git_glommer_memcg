@@ -6357,6 +6357,8 @@ mem_cgroup_css_alloc(struct cgroup *cont)
 		res_counter_init(&memcg->res, NULL);
 		res_counter_init(&memcg->memsw, NULL);
 		res_counter_init(&memcg->kmem, NULL);
+		if (page_cgroup_init())
+			goto free_out;
 	}
 
 	memcg->last_scanned_node = MAX_NUMNODES;
