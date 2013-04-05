@@ -53,9 +53,7 @@ static int __init alloc_node_page_cgroup(int nid)
 		return 0;
 
 	table_size = sizeof(struct page_cgroup) * nr_pages;
-
-	base = __alloc_bootmem_node_nopanic(NODE_DATA(nid),
-			table_size, PAGE_SIZE, __pa(MAX_DMA_ADDRESS));
+	base = vzalloc_node(table_size, nid);
 	if (!base)
 		return -ENOMEM;
 	NODE_DATA(nid)->node_page_cgroup = base;
@@ -63,7 +61,7 @@ static int __init alloc_node_page_cgroup(int nid)
 	return 0;
 }
 
-void __init page_cgroup_init_flatmem(void)
+void __init page_cgroup_init(void)
 {
 
 	int nid, fail;
@@ -105,38 +103,37 @@ struct page_cgroup *lookup_page_cgroup(struct page *page)
 	return section->page_cgroup + pfn;
 }
 
-static void *__meminit alloc_page_cgroup(size_t size, int nid)
+static void *alloc_page_cgroup(int nid)
 {
 	gfp_t flags = GFP_KERNEL | __GFP_ZERO | __GFP_NOWARN;
 	void *addr = NULL;
+	size_t table_size = sizeof(struct page_cgroup) * PAGES_PER_SECTION;
 
-	addr = alloc_pages_exact_nid(nid, size, flags);
+	addr = alloc_pages_exact_nid(nid, table_size, flags);
 	if (addr) {
-		kmemleak_alloc(addr, size, 1, flags);
+		kmemleak_alloc(addr, table_size, 1, flags);
 		return addr;
 	}
 
 	if (node_state(nid, N_HIGH_MEMORY))
-		addr = vzalloc_node(size, nid);
+		addr = vzalloc_node(table_size, nid);
 	else
-		addr = vzalloc(size);
+		addr = vzalloc(table_size);
 
 	return addr;
 }
 
-static int __meminit init_section_page_cgroup(unsigned long pfn, int nid)
+static int init_section_page_cgroup(unsigned long pfn, int nid)
 {
 	struct mem_section *section;
 	struct page_cgroup *base;
-	unsigned long table_size;
 
 	section = __pfn_to_section(pfn);
 
 	if (section->page_cgroup)
 		return 0;
 
-	table_size = sizeof(struct page_cgroup) * PAGES_PER_SECTION;
-	base = alloc_page_cgroup(table_size, nid);
+	base = alloc_page_cgroup(nid);
 
 	/*
 	 * The value stored in section->page_cgroup is (base - pfn)
@@ -156,7 +153,6 @@ static int __meminit init_section_page_cgroup(unsigned long pfn, int nid)
 	 */
 	pfn &= PAGE_SECTION_MASK;
 	section->page_cgroup = base - pfn;
-	total_usage += table_size;
 	return 0;
 }
 #ifdef CONFIG_MEMORY_HOTPLUG

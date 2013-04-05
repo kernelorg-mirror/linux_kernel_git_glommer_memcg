@@ -457,7 +457,6 @@ static void __init mm_init(void)
 	 * page_cgroup requires contiguous pages,
 	 * bigger than MAX_ORDER unless SPARSEMEM.
 	 */
-	page_cgroup_init_flatmem();
 	mem_init();
 	kmem_cache_init();
 	percpu_init_late();

@@ -29,17 +29,7 @@ struct page_cgroup {
 
 void __meminit pgdat_page_cgroup_init(struct pglist_data *pgdat);
 
-#ifdef CONFIG_SPARSEMEM
-static inline void __init page_cgroup_init_flatmem(void)
-{
-}
 extern void __init page_cgroup_init(void);
-#else
-void __init page_cgroup_init_flatmem(void);
-static inline void __init page_cgroup_init(void)
-{
-}
-#endif
 
 struct page_cgroup *lookup_page_cgroup(struct page *page);
 struct page *lookup_cgroup_page(struct page_cgroup *pc);
@@ -97,11 +87,6 @@ static inline struct page_cgroup *lookup_page_cgroup(struct page *page)
 static inline void page_cgroup_init(void)
 {
 }
-
-static inline void __init page_cgroup_init_flatmem(void)
-{
-}
-
 #endif /* CONFIG_MEMCG */
 
 #include <linux/swap.h>
