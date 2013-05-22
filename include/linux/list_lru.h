@@ -42,18 +42,8 @@ struct list_lru_array {
 };
 
 struct list_lru {
-	/*
-	 * Because we use a fixed-size array, this struct can be very big if
-	 * MAX_NUMNODES is big. If this becomes a problem this is fixable by
-	 * turning this into a pointer and dynamically allocating this to
-	 * nr_node_ids. This quantity is firwmare-provided, and still would
-	 * provide room for all nodes at the cost of a pointer lookup and an
-	 * extra allocation. Because that allocation will most likely come from
-	 * a different slab cache than the main structure holding this
-	 * structure, we may very well fail.
-	 */
-	struct list_lru_node	node[MAX_NUMNODES];
-	atomic_long_t		node_totals[MAX_NUMNODES];
+	struct list_lru_node	*node;
+	atomic_long_t		*node_totals;
 	nodemask_t		active_nodes;
 #ifdef CONFIG_MEMCG_KMEM
 	/* All memcg-aware LRUs will be chained in the lrus list */
@@ -78,13 +68,10 @@ struct mem_cgroup;
 struct list_lru_array *lru_alloc_array(void);
 int memcg_update_all_lrus(unsigned long num);
 void memcg_destroy_all_lrus(struct mem_cgroup *memcg);
-void list_lru_destroy(struct list_lru *lru);
 int __memcg_init_lru(struct list_lru *lru);
-#else
-static inline void list_lru_destroy(struct list_lru *lru)
-{
-}
 #endif
+
+void list_lru_destroy(struct list_lru *lru);
 
 int __list_lru_init(struct list_lru *lru, bool memcg_enabled);
 static inline int list_lru_init(struct list_lru *lru)

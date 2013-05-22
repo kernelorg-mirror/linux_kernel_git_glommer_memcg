@@ -334,7 +334,6 @@ int __memcg_init_lru(struct list_lru *lru)
 {
 	int ret;
 
-	INIT_LIST_HEAD(&lru->lrus);
 	mutex_lock(&all_memcg_lrus_mutex);
 	list_add(&lru->lrus, &all_memcg_lrus);
 	ret = memcg_new_lru(lru);
@@ -369,8 +368,11 @@ out:
 	return ret;
 }
 
-void list_lru_destroy(struct list_lru *lru)
+static void list_lru_destroy_memcg(struct list_lru *lru)
 {
+	if (list_empty(&lru->lrus))
+		return;
+
 	mutex_lock(&all_memcg_lrus_mutex);
 	list_del(&lru->lrus);
 	mutex_unlock(&all_memcg_lrus_mutex);
@@ -388,20 +390,58 @@ void memcg_destroy_all_lrus(struct mem_cgroup *memcg)
 	}
 	mutex_unlock(&all_memcg_lrus_mutex);
 }
+
+int memcg_list_lru_init(struct list_lru *lru, bool memcg_enabled)
+{
+	INIT_LIST_HEAD(&lru->lrus);
+	if (memcg_enabled)
+		return memcg_init_lru(lru);
+
+	return 0;
+}
+#else
+static void list_lru_destroy_memcg(struct list_lru *lru)
+{
+}
+
+int memcg_list_lru_init(struct list_lru *lru, bool memcg_enabled)
+{
+	return 0;
+}
 #endif
 
 int __list_lru_init(struct list_lru *lru, bool memcg_enabled)
 {
 	int i;
 
+	size_t size;
+
+	size = sizeof(*lru->node) * nr_node_ids;
+	lru->node = kzalloc(size, GFP_KERNEL);
+	if (!lru->node)
+		return -ENOMEM;
+
+	size = sizeof(*lru->node) * nr_node_ids;
+	lru->node_totals = kzalloc(size, GFP_KERNEL);
+	if (!lru->node_totals) {
+		kfree(lru->node);
+		return -ENOMEM;
+	}
+
 	nodes_clear(lru->active_nodes);
-	for (i = 0; i < MAX_NUMNODES; i++) {
+	for (i = 0; i < nr_node_ids; i++) {
 		list_lru_init_one(&lru->node[i]);
 		atomic_long_set(&lru->node_totals[i], 0);
 	}
 
-	if (memcg_enabled)
-		return memcg_init_lru(lru);
-	return 0;
+	return memcg_list_lru_init(lru, memcg_enabled);
 }
 EXPORT_SYMBOL_GPL(__list_lru_init);
+
+void list_lru_destroy(struct list_lru *lru)
+{
+	kfree(lru->node);
+	kfree(lru->node_totals);
+	list_lru_destroy_memcg(lru);
+}
+EXPORT_SYMBOL_GPL(list_lru_destroy);
